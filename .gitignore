@@ -1,2 +1,5 @@
 # models
 ContraBERT/saved_models/pretrain_models/
+
+# artifacts from decompressing files
+*Zone.Identifier
