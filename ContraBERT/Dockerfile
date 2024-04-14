@@ -1,20 +1,23 @@
 #FROM python:3.9-slim-buster
-FROM nvidia/cuda:10.2-runtime-ubuntu18.04
-
+#FROM nvidia/cuda:10.2-runtime-ubuntu18.04
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --fix-missing\
      sudo \
-     python3-pip \
-     python3.8 \
-     python3.8-dev
+     python3 \
+     python3-pip 
+#     python3.9.19-bookworm
+#     python3.8-dev
 
 RUN update-ca-certificates
-# Set Python 3.8 as the default version
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1
+## Set Python 3.8 as the default version
+# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1
+# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/3.9.19-bookworm 1
 COPY requirements.txt ./
 # Install Python packages
 RUN pip3 install --upgrade pip
-RUN pip3 install -r requirements.txt
+RUN --mount=type=cache,mode=0777,target=/root/.cache/pip \
+     pip3 install -r requirements.txt
 
 # Create a user
 RUN useradd -m -d /home/ma-user -s /bin/bash -g 100 -u 1000 ma-user
@@ -25,11 +28,12 @@ RUN mkdir -p /home/ma-user/saved_models/base_model && chown -R ma-user:users /ho
 # Copy your application files to the container
 COPY --chown=ma-user:users defect_detection /home/ma-user/defect_detection
 COPY --chown=ma-user:users multiclass /home/ma-user/multiclass
+COPY --chown=ma-user:users data /home/ma-user/data
 
 # Add the bash script for running the model
 COPY --chown=ma-user:users run_model.sh ./
 
-COPY saved_models/pretrain_models/ContraBERT_C /home/ma-user/saved_models/pretrain_models/ContraBERT_C
+#COPY saved_models/pretrain_models/ContraBERT_C /home/ma-user/saved_models/pretrain_models/ContraBERT_C
 # https://drive.google.com/drive/u/0/folders/1t8VX6aYchpJolbH4mkhK3IQGzyHrDD3C
 COPY saved_models/pretrain_models/ContraBERT_G /home/ma-user/saved_models/pretrain_models/ContraBERT_G
 # Make the script executable
@@ -42,6 +46,7 @@ RUN python3 load_huggingface_models.py
 
 ENV DATA_PATH /home/ma-user/data
 ENV OUTPUT_PATH /home/ma-user/output
+
 
 # Set the environment variables
 ENV MODEL_NAME ContraBERT_G
