@@ -3,3 +3,9 @@ ContraBERT/saved_models/pretrain_models/
 
 # artifacts from decompressing files
 *Zone.Identifier
+
+#docker images, etc
+*.tar
+
+#build artifacts
+zoneinfo
