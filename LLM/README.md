@@ -114,13 +114,19 @@ This command will start the Docker container with the specified volume mounts, a
 ## Step 5: Executing the Script inside the Docker Container
 
 Once inside the Docker container, you can install the required Python packages from the previously created wheels directory and execute the script. Follow these commands:
+
+This installs the Python packages using the wheels from the wheels directory:
 ```
 pip install accelerate einops bitsandbytes peft --no-index --find-links=/wheels
 ```
+To ensure best use of GPU memory, setting this environment variable:
+```
+export 'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,expandable_segments:True'
+```
+To run the script `run.py` with the specified arguments:
 ```
 python3 /home/ma-user/modelarts/inputs/code_1/finetune/run.py --dataset_tar_gz='/home/ma-user/modelarts/inputs/data_0/java_k_1_strict_2023_07_03.tar.gz' --split="train" --seq_length 2048 --batch_size 1 --gradient_accumulation_steps 160 --learning_rate 1e-4 --lr_scheduler_type="cosine" --num_warmup_steps 1 --weight_decay 0.05 --output_dir='/home/ma-user/modelarts/outputs/results_0/' --log_freq=1 --ignore_large_functions --delete_whitespaces --base_model starcoder --lora_r 8
 ```
-The first command installs the Python packages using the wheels from the wheels directory. The second command runs the script `run.py` with the specified arguments.
 
 Another way of running the script:
 ```

@@ -22,7 +22,7 @@ from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
                           TrainingArguments, set_seed)
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training, set_peft_model_state_dict, AdaLoraConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, set_peft_model_state_dict, AdaLoraConfig, PeftModel
 
 sys.path.append("/home/ma-user/modelarts/inputs/code_1")
 from finetune.dataset import create_datasets_for_classification
@@ -38,6 +38,7 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+model_checkpoint_name = "adapter_model.bin"
 
 
 class SaveBestModelCallback(TrainerCallback):
@@ -52,7 +53,7 @@ class SaveBestModelCallback(TrainerCallback):
 
             kwargs["model"].save_pretrained(checkpoint_folder)
 
-            pytorch_model_path = os.path.join(checkpoint_folder, "pytorch_model.bin")
+            pytorch_model_path = os.path.join(checkpoint_folder, model_checkpoint_name)
             torch.save({}, pytorch_model_path)
 
             print(f"New best model found! Saving model with AUC {state.best_metric} to {checkpoint_folder}")
@@ -70,7 +71,7 @@ class LoadBestModelCallback(TrainerCallback):
     def on_train_end(self, args, state: TrainerState, control: TrainerControl, **kwargs):
         if state.best_model_checkpoint is not None:
             print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
-            best_model_path = os.path.join(state.best_model_checkpoint, "adapter_model.bin")
+            best_model_path = os.path.join(state.best_model_checkpoint, model_checkpoint_name)
             adapters_weights = torch.load(best_model_path)
             model = kwargs["model"]
             set_peft_model_state_dict(model, adapters_weights)
@@ -255,6 +256,9 @@ def prepare_model_and_data(args):
             device_map={"": Accelerator().process_index},
             num_labels=2, return_unused_kwargs=True)
 
+    # print("model config:")
+    # print(config)
+
     if args.several_funcs_in_batch:
         args.sep_token_id = sep_token_id
         config.set_special_params(args)
@@ -270,6 +274,9 @@ def prepare_model_and_data(args):
             config=config,
             **model_kwargs
         )
+    
+    # return {"model": model, "tokenizer":{}, "data": ({},{},{})}
+
     train_data, val_data, test_data = create_datasets_for_classification(tokenizer, args, sep_token_id)
 
     return {"model": model, "tokenizer":tokenizer, "data": (train_data, val_data, test_data)}
@@ -277,7 +284,11 @@ def prepare_model_and_data(args):
 def prepare_peft_model(model, args):
     for name, module in model.named_modules():
         print(f"{name} : {type(module).__name__}", flush=True)
-    model = prepare_model_for_int8_training(model)
+    #model = prepare_model_for_int8_training(model)
+    # prepare_model_for_int8_training removed in peft 0.10.0,
+    # replaced by prepare_model_for_kbit_training
+    # https://github.com/huggingface/peft/issues/1583#issuecomment-2017550784
+    model = prepare_model_for_kbit_training(model)
 
     for name, module in model.named_modules():
         print(f"{name} : {type(module).__name__}", flush=True)
@@ -335,6 +346,8 @@ def prepare_trainer(model, train_data, val_data, args):
         ddp_find_unused_parameters=False,
         num_train_epochs=args.num_train_epochs,
     )
+    # print("training_args:")
+    # print(training_args)
     trainer = Trainer(model=model, args=training_args, train_dataset=train_data, eval_dataset=val_data,
                       compute_metrics=EvalQuality(),
                       callbacks=[LoadBestModelCallback, SaveBestModelCallback])
@@ -346,17 +359,27 @@ def run_training(args):
     model = model_and_data['model']
     tokenizer = model_and_data['tokenizer']
     train_data, val_data, test_data = model_and_data['data']
-    model = prepare_peft_model(model, args)
-    trainer = prepare_trainer(model, train_data, val_data, args)
+    peft_model = prepare_peft_model(model, args)
+    trainer = prepare_trainer(peft_model, train_data, val_data, args)
 
     print("Training...")
     # debug_params(trainer)
     trainer.train()
     print("Saving last checkpoint of the model")
-    model.save_pretrained(os.path.join(args.output_dir, "final_checkpoint/"))
-    # results = trainer.predict(test_data)
-    # print(f"Test results...")
-    # print(results.metrics)
+    peft_model.save_pretrained(os.path.join(args.output_dir, "final_checkpoint/"))
+
+    # Trained only the adapter trainers, need to merge with original model for inference
+    # fine_tuned_model = PeftModel.from_pretrained(model,  "/home/ma-user/modelarts/checkpoint-4")
+    fine_tuned_model = PeftModel.from_pretrained(model, peft_model)
+    merged_model = fine_tuned_model.merge_and_unload()
+
+    # save newly finetuned model
+    merged_model.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
+    tokenizer.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
+
+    results = trainer.predict(test_data)
+    print(f"Trainer test results...")
+    print(results.metrics)
 
 
 def run_test_peft(args):
@@ -372,7 +395,7 @@ def run_test_peft(args):
 
     if test_checkpoint_path:
         print(f"Loading: [{test_checkpoint_path}]...")
-        best_model_path = os.path.join(test_checkpoint_path, "adapter_model.bin")
+        best_model_path = os.path.join(test_checkpoint_path, model_checkpoint_name)
         print(os.path.exists(test_checkpoint_path))
         print(os.path.exists(best_model_path))
         adapters_weights = torch.load(best_model_path)
@@ -388,7 +411,12 @@ def run_test(args):
     model = model_and_data['model']
     tokenizer = model_and_data['tokenizer']
     train_data, val_data, test_data = model_and_data['data']
-    trainer = prepare_trainer(model, train_data, val_data, args)
+    model.load_adapter('/home/ma-user/modelarts/checkpoint-4')
+    model.enable_adapters()
+    peft_model = model
+    #peft_model = AutoModelForCausalLM.from_pretrained('/home/ma-user/modelarts/checkpoint-4')
+    # peft_model = prepare_peft_model(model, args)
+    trainer = prepare_trainer(peft_model, train_data, val_data, args)
     results = trainer.predict(test_data)
     print(f"Test results...")
     print(results.metrics)

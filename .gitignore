@@ -1,5 +1,6 @@
 # models
 ContraBERT/saved_models/pretrain_models/
+LLM/saved_models
 
 # artifacts from decompressing files
 *Zone.Identifier
@@ -9,3 +10,7 @@ ContraBERT/saved_models/pretrain_models/
 
 #build artifacts
 zoneinfo
+
+#caches
+__pycache__
+LLM/wheels

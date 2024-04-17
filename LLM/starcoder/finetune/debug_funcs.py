@@ -4,7 +4,7 @@ from transformers.debug_utils import DebugOption
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers import TrainerState
 from transformers.deepspeed import deepspeed_init, deepspeed_load_checkpoint
-from transformers.trainer_utils import has_length, ShardedDDPOption
+from transformers.trainer_utils import has_length
 
 
 def _build_debug_param_to_name_mapping_our_debug(ddp_model, parameters):
@@ -108,8 +108,11 @@ def debug_params(trainer, batch_size=1):
             debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
     delay_optimizer_creation = (
+        # trainer.sharded_ddp == ShardedDDPOption.SIMPLE replaced with trainer.is_fsdb_enabled
+        # https://github.com/intel/intel-extension-for-transformers/issues/866
+        # https://github.com/intel/intel-extension-for-transformers/commit/4e6834a4afbf2a3e458212f96c9b9db65dfe7f3b#diff-7394cf661bf068a59d884c5b348b1e82b0fd6e6a3a52b56c6f0bb097f09b3ac5
             trainer.sharded_ddp is not None
-            and trainer.sharded_ddp != ShardedDDPOption.SIMPLE
+            and trainer.is_fsdb_enabled
             or is_sagemaker_mp_enabled()
             or trainer.fsdp is not None
     )
