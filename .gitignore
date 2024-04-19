@@ -1,6 +1,7 @@
 # models
 ContraBERT/saved_models/pretrain_models/
 LLM/saved_models
+LLM/outputs
 
 # artifacts from decompressing files
 *Zone.Identifier

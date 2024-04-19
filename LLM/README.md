@@ -5,6 +5,8 @@
 This folder contains a program providing the code for finetuning of LLM models StarCoder and WizardCoder for the task of vulnerability detection. The program accepts several command-line arguments that can be used to customize its behavior. Here is a brief explanation of each argument:
 
 - `model_path`: a string specifying the path to the model directory.
+- `adapter_path`: a string specifying the path to a 
+PEFT compatible adapter model.
 - `dataset_name`: a string specifying the name of the dataset.
 - `subset`: a string specifying the name of the subset of the dataset to use.
 - `split`: a string specifying the name of the split of the dataset to use.

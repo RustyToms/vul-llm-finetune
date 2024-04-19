@@ -16,8 +16,7 @@ WORKDIR /home/ma-user
 
 # Copy your application files to the container
 COPY --chown=ma-user:users requirements.txt /home/ma-user/
-RUN --mount=type=cache,mode=0777,target=/root/.cache/pip \
-    pip3 install -r requirements.txt
 COPY --chown=ma-user:users starcoder /home/ma-user/modelarts/inputs/code_1/
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,expandable_segments:True
 
 ENTRYPOINT ["/bin/bash"]

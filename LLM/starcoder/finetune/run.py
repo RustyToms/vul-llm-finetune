@@ -19,7 +19,7 @@ from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
                           EvalPrediction, GPTBigCodeConfig,
                           GPTBigCodeForSequenceClassification, Trainer,
                           TrainerCallback, TrainerControl, TrainerState,
-                          TrainingArguments, set_seed)
+                          TrainingArguments, BitsAndBytesConfig, set_seed)
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, set_peft_model_state_dict, AdaLoraConfig, PeftModel
@@ -84,6 +84,7 @@ def get_args():
 
     # Paths and data related arguments
     parser.add_argument("--model_path", type=str, default="/home/ma-user/modelarts/inputs/model_2/")
+    parser.add_argument("--adapter_path", type=str, default=None)
     parser.add_argument("--dataset_name", type=str, default="HuggingFaceH4/CodeAlpaca_20K")
     parser.add_argument("--subset", type=str)
     parser.add_argument("--split", type=str)
@@ -105,12 +106,14 @@ def get_args():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=16)
     parser.add_argument("--eos_token_id", type=int, default=49152)
     parser.add_argument("--lora_r", type=int, default=16)
-    parser.add_argument("--lora_alpha", type=int, default=32)
+    parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
 
     # Learning parameters
     parser.add_argument("--learning_rate", type=float, default=5e-6)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
+    parser.add_argument("--lr_scheduler_kwargs", type=lambda x: {k:int(v) for k,v in (i.split(':') for i in x.split(','))},
+    help='comma-separated field:position pairs, e.g. Date:0,Amount:2,Payee:5,Memo:9', default={})
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.05)
     parser.add_argument("--num_train_epochs", default=10, type=int)
@@ -188,7 +191,7 @@ class EvalQuality():
         logits_vect = np.vstack(logits_vect)
         probs_pos_class = scipy.special.softmax(logits_vect, axis=-1)[:, 1]
         full_report = quality_full_report_val(probs_pos_class, labels_vect)
-        print(full_report)
+        # print(full_report)
         print(f"dataset size on evaluation: {len(labels_vect)}")
         report = full_report[2]
         if self.metric:
@@ -199,25 +202,25 @@ class EvalQuality():
 
 def create_small_gptbigcode_config(tokenizer):
     config = GPTBigCodeConfig(
-        vocab_size=len(tokenizer),  # Размер словаря
-        n_positions=2048,  # Максимальное количество позиций
-        n_embd=10,  # Размерность вложений и скрытых состояний
-        n_layer=2,  # Количество скрытых слоев в кодировщике Transformer
-        n_head=2,  # Количество голов внимания для каждого слоя внимания в кодировщике Transformer
-        n_inner=None,  # Размерность внутренних слоев feed-forward. None установит его в 4 раза больше n_embd
-        activation_function="gelu_pytorch_tanh",  # Функция активации
-        resid_pdrop=0.1,  # Вероятность dropout для всех полносвязных слоев в вложениях, кодировщике и пулере
-        embd_pdrop=0.1,  # Вероятность dropout для вложений
-        attn_pdrop=0.1,  # Вероятность dropout для внимания
-        layer_norm_epsilon=1e-5,  # Эпсилон для слоев нормализации
+        vocab_size=len(tokenizer), # Dictionary size
+        n_positions=2048, # Maximum number of positions
+        n_embd=10, # Dimension of embeddings and hidden states
+        n_layer=2, # Number of hidden layers in the Transformer encoder
+        n_head=2, # Number of attention heads for each attention layer in the Transformer encoder
+        n_inner=None, # Dimension of the internal feed-forward layers. `None` will set it to 4 times the size of n_embd
+        activation_function="gelu_pytorch_tanh", # Activation function
+        resid_pdrop=0.1, # Dropout probability for all fully connected layers in attachments, encoder and pooler
+        embd_pdrop=0.1, # Dropout probability for attachments
+        attn_pdrop=0.1, # Dropout probability for attention
+        layer_norm_epsilon=1e-5, # Epsilon for normalization layers
         initializer_range=0.02,
-        # Стандартное отклонение truncated_normal_initializer для инициализации всех матриц весов
-        scale_attn_weights=True,  # Масштабировать веса внимания, разделив на sqrt(hidden_size)
+        # Standard deviation truncated_normal_initializer to initialize all weight matrices
+        scale_attn_weights=True, # Scale attention weights by dividing by sqrt(hidden_size)
         use_cache=True,
-        # Должна ли модель возвращать последние ключи/значения внимания (не используется всеми моделями)
-        attention_softmax_in_fp32=True,  # Вызывать ли слияние softmax в float32
-        scale_attention_softmax_in_fp32=True,  # Масштабировать ли softmax внимания в float32
-        attention_type=True,  # Использовать ли Multi-Query Attention (True) или Multi-Head Attention (False)
+        # Whether the model should return the latest attention keys/values (not used by all models)
+        attention_softmax_in_fp32=True, # Whether to force softmax merge into float32
+        scale_attention_softmax_in_fp32=True, # Whether to scale attention softmax to float32
+        attention_type=True, # Whether to use Multi-Query Attention (True) or Multi-Head Attention (False)
         num_labels=2
     )
     return config
@@ -246,15 +249,24 @@ def prepare_model_and_data(args):
         if  args.several_funcs_in_batch\
         else GPTBigCodeForSequenceClassification
 
+    bnb_config= BitsAndBytesConfig(
+        load_in_8bit=True,
+        llm_int8_threshold=5.0,
+        # llm_int8_has_fp16_weight=True
+    )
+
     if args.debug_on_small_model:
         config = create_small_gptbigcode_config(tokenizer)
     else:
         config_class = GPTBigCodeConfigClassificationSeveralFunc if args.several_funcs_in_batch else GPTBigCodeConfig
-        config, model_kwargs = config_class.from_pretrained(args.model_path,
+        config, model_kwargs = config_class.from_pretrained(
+            args.model_path,
             use_cache=not args.no_gradient_checkpointing,
-            load_in_8bit=True,
+            #load_in_8bit=True,
             device_map={"": Accelerator().process_index},
-            num_labels=2, return_unused_kwargs=True)
+            num_labels=2,
+            return_unused_kwargs=True
+        )
 
     # print("model config:")
     # print(config)
@@ -272,6 +284,7 @@ def prepare_model_and_data(args):
         model = ModelClass.from_pretrained(
             args.model_path,
             config=config,
+            quantization_config=bnb_config,
             **model_kwargs
         )
     
@@ -282,16 +295,16 @@ def prepare_model_and_data(args):
     return {"model": model, "tokenizer":tokenizer, "data": (train_data, val_data, test_data)}
 
 def prepare_peft_model(model, args):
-    for name, module in model.named_modules():
-        print(f"{name} : {type(module).__name__}", flush=True)
+    # for name, module in model.named_modules():
+    #     print(f"{name} : {type(module).__name__}", flush=True)
     #model = prepare_model_for_int8_training(model)
     # prepare_model_for_int8_training removed in peft 0.10.0,
     # replaced by prepare_model_for_kbit_training
     # https://github.com/huggingface/peft/issues/1583#issuecomment-2017550784
     model = prepare_model_for_kbit_training(model)
 
-    for name, module in model.named_modules():
-        print(f"{name} : {type(module).__name__}", flush=True)
+    # for name, module in model.named_modules():
+    #     print(f"{name} : {type(module).__name__}", flush=True)
 
     if str(args.base_model).lower() == "codegen2":
         target_modules = ["qkv_proj", "out_proj", "fc_in", "fc_out"]
@@ -312,10 +325,11 @@ def prepare_peft_model(model, args):
         lora_dropout=args.lora_dropout,
         bias=args.lora_bias,
         target_modules=target_modules,  # Starcoder
+        #target_modules="all-linear",
         modules_to_save=modules_to_save,
         task_type="SEQ_CLS"
     )
-
+    
     model = get_peft_model(model, lora_config)
     print_trainable_parameters(model)
     return model
@@ -336,9 +350,12 @@ def prepare_trainer(model, train_data, val_data, args):
         per_device_eval_batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         lr_scheduler_type=args.lr_scheduler_type,
+        lr_scheduler_kwargs=args.lr_scheduler_kwargs,
         warmup_steps=args.num_warmup_steps,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         gradient_checkpointing=not args.no_gradient_checkpointing,
+        # https://pytorch.org/docs/2.0/checkpoint.html#torch.utils.checkpoint.checkpoint
+        # gradient_checkpointing_kwargs={"use_reentrant": False},
         fp16=not args.no_fp16,
         bf16=args.bf16,
         weight_decay=args.weight_decay,
@@ -368,18 +385,18 @@ def run_training(args):
     print("Saving last checkpoint of the model")
     peft_model.save_pretrained(os.path.join(args.output_dir, "final_checkpoint/"))
 
-    # Trained only the adapter trainers, need to merge with original model for inference
-    # fine_tuned_model = PeftModel.from_pretrained(model,  "/home/ma-user/modelarts/checkpoint-4")
-    fine_tuned_model = PeftModel.from_pretrained(model, peft_model)
-    merged_model = fine_tuned_model.merge_and_unload()
-
-    # save newly finetuned model
-    merged_model.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
-    tokenizer.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
-
     results = trainer.predict(test_data)
     print(f"Trainer test results...")
     print(results.metrics)
+
+    # Trained only the adapter trainers, need to merge with original model for inference
+    # fine_tuned_model = PeftModel.from_pretrained(model,  "/home/ma-user/modelarts/checkpoint-4")
+    # fine_tuned_model = PeftModel.from_pretrained(model, os.path.join(args.output_dir, "final_checkpoint/"))
+    # merged_model = fine_tuned_model.merge_and_unload()
+
+    # save newly finetuned model
+    # merged_model.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
+    # tokenizer.save_pretrained(os.path.join(args.output_dir, "finetuned_model/"))
 
 
 def run_test_peft(args):
@@ -411,11 +428,15 @@ def run_test(args):
     model = model_and_data['model']
     tokenizer = model_and_data['tokenizer']
     train_data, val_data, test_data = model_and_data['data']
-    model.load_adapter('/home/ma-user/modelarts/checkpoint-4')
-    model.enable_adapters()
-    peft_model = model
-    #peft_model = AutoModelForCausalLM.from_pretrained('/home/ma-user/modelarts/checkpoint-4')
-    # peft_model = prepare_peft_model(model, args)
+    
+    if args.adapter_path:
+        peft_model = prepare_model_for_kbit_training(model)
+        peft_model.load_adapter(args.adapter_path)
+        peft_model.enable_adapters()
+    else: 
+        #peft_model = AutoModelForCausalLM.from_pretrained('/home/ma-user/modelarts/checkpoint-4')
+        peft_model = prepare_peft_model(model, args)
+    
     trainer = prepare_trainer(peft_model, train_data, val_data, args)
     results = trainer.predict(test_data)
     print(f"Test results...")
