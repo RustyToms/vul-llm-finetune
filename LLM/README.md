@@ -119,11 +119,7 @@ Once inside the Docker container, you can install the required Python packages f
 
 This installs the Python packages using the wheels from the wheels directory:
 ```
-pip install accelerate einops bitsandbytes peft --no-index --find-links=/wheels
-```
-To ensure best use of GPU memory, setting this environment variable:
-```
-export 'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,expandable_segments:True'
+pip install -r requirements.txt --find-links=/wheels
 ```
 To run the script `run.py` with the specified arguments:
 ```

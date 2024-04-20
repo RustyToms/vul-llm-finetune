@@ -83,7 +83,7 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     # Paths and data related arguments
-    parser.add_argument("--model_path", type=str, default="/home/ma-user/modelarts/inputs/model_2/")
+    parser.add_argument("--model_path", type=str, default="/home/ma-user/modelarts/inputs/models/starcoder/")
     parser.add_argument("--adapter_path", type=str, default=None)
     parser.add_argument("--dataset_name", type=str, default="HuggingFaceH4/CodeAlpaca_20K")
     parser.add_argument("--subset", type=str)
@@ -112,7 +112,7 @@ def get_args():
     # Learning parameters
     parser.add_argument("--learning_rate", type=float, default=5e-6)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
-    parser.add_argument("--lr_scheduler_kwargs", type=lambda x: {k:int(v) for k,v in (i.split(':') for i in x.split(','))},
+    parser.add_argument("--lr_scheduler_kwargs", type=lambda x: {k:v for k,v in (i.split(':') for i in x.split(','))},
     help='comma-separated field:position pairs, e.g. Date:0,Amount:2,Payee:5,Memo:9', default={})
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.05)
@@ -325,7 +325,7 @@ def prepare_peft_model(model, args):
         lora_dropout=args.lora_dropout,
         bias=args.lora_bias,
         target_modules=target_modules,  # Starcoder
-        #target_modules="all-linear",
+        # target_modules="all-linear",
         modules_to_save=modules_to_save,
         task_type="SEQ_CLS"
     )
