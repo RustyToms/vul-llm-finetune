@@ -1,28 +1,22 @@
 import argparse
-import json
 import logging
 import sys
-import tarfile
-import tempfile
 import shutil
-import math
 
 import numpy as np
 import scipy.special
 import torch
 from accelerate import Accelerator
-from torch.utils.data import IterableDataset
-from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 import transformers
-from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
-                          EvalPrediction, GPTBigCodeConfig,
+from transformers import (AutoTokenizer, GPTBigCodeConfig,
                           GPTBigCodeForSequenceClassification, Trainer,
                           TrainerCallback, TrainerControl, TrainerState,
                           TrainingArguments, BitsAndBytesConfig, set_seed)
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, set_peft_model_state_dict, AdaLoraConfig, PeftModel
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, set_peft_model_state_dict, AdaLoraConfig
 
 sys.path.append("/home/ma-user/modelarts/inputs/code_1")
 from finetune.dataset import create_datasets_for_classification
@@ -362,6 +356,7 @@ def prepare_trainer(model, train_data, val_data, args):
         run_name="StarCoder-finetuned",
         ddp_find_unused_parameters=False,
         num_train_epochs=args.num_train_epochs,
+        report_to=["tensorboard"],
     )
     # print("training_args:")
     # print(training_args)
@@ -374,10 +369,13 @@ def prepare_trainer(model, train_data, val_data, args):
 def run_training(args):
     model_and_data = prepare_model_and_data(args)
     model = model_and_data['model']
-    tokenizer = model_and_data['tokenizer']
     train_data, val_data, test_data = model_and_data['data']
     peft_model = prepare_peft_model(model, args)
     trainer = prepare_trainer(peft_model, train_data, val_data, args)
+
+    prelim_results = trainer.predict(test_data)
+    print(f"Trainer preliminary test results...")
+    print(prelim_results.metrics)
 
     print("Training...")
     # debug_params(trainer)
