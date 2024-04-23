@@ -38,7 +38,15 @@ model_checkpoint_name = "adapter_model.bin"
 class SaveBestModelCallback(TrainerCallback):
     def on_evaluate(self, args, state: TrainerState, control: TrainerControl, metrics, **kwargs):
         # Get the current AUC from the metrics
-        current_auc = metrics['eval_roc_auc']
+        # if eval_on_test_also is True the property may be eval_valid_roc_auc
+        # if it is eval_test_roc_auc we should skip this
+        if 'eval_roc_auc' in metrics:
+            current_auc = metrics['eval_roc_auc']
+        elif 'eval_valid_roc_auc' in metrics:
+            current_auc = metrics['eval_valid_roc_auc']
+        else:
+            return
+           
 
         # Compare it to the best AUC so far (if any)
         if state.best_metric is None or current_auc > state.best_metric:
@@ -111,6 +119,9 @@ def get_args():
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.05)
     parser.add_argument("--num_train_epochs", default=10, type=int)
+    parser.add_argument("--evaluation_strategy", default="epoch", type=str)
+    parser.add_argument("--eval_steps", default=100, type=int)
+    parser.add_argument("--eval_on_test_also", action="store_true", default=False)
 
     # Runtime and logging parameters
     parser.add_argument("--local-rank", type=int, default=0)
@@ -328,7 +339,7 @@ def prepare_peft_model(model, args):
     print_trainable_parameters(model)
     return model
 
-def prepare_trainer(model, train_data, val_data, args):
+def prepare_trainer(model, train_data, val_data, args, test_data=None):
     train_data.start_iteration = 0
 
     print("Starting main loop")
@@ -336,7 +347,8 @@ def prepare_trainer(model, train_data, val_data, args):
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         dataloader_drop_last=True,
-        evaluation_strategy="epoch",
+        evaluation_strategy=args.evaluation_strategy,
+        eval_steps=args.eval_steps,
         save_strategy="no",
         save_total_limit=2,
         logging_steps=args.log_freq,
@@ -358,8 +370,13 @@ def prepare_trainer(model, train_data, val_data, args):
         num_train_epochs=args.num_train_epochs,
         report_to=["tensorboard"],
     )
-    # print("training_args:")
-    # print(training_args)
+
+    # Do evaluations on both evaluation data and test data if the eval_on_test_also flag is true
+    if args.eval_on_test_also and test_data:
+        val_data = {
+            "valid": val_data,
+            "test": test_data,
+        }
     trainer = Trainer(model=model, args=training_args, train_dataset=train_data, eval_dataset=val_data,
                       compute_metrics=EvalQuality(),
                       callbacks=[LoadBestModelCallback, SaveBestModelCallback])
@@ -371,7 +388,7 @@ def run_training(args):
     model = model_and_data['model']
     train_data, val_data, test_data = model_and_data['data']
     peft_model = prepare_peft_model(model, args)
-    trainer = prepare_trainer(peft_model, train_data, val_data, args)
+    trainer = prepare_trainer(peft_model, train_data, val_data, args, test_data)
 
     prelim_results = trainer.predict(test_data)
     print(f"Trainer preliminary test results...")
