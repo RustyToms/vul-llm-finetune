@@ -53,11 +53,6 @@ class SaveBestModelCallback(TrainerCallback):
             state.best_metric = current_auc
             checkpoint_folder = os.path.join(args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{round(state.epoch)}")
 
-            kwargs["model"].save_pretrained(checkpoint_folder)
-
-            pytorch_model_path = os.path.join(checkpoint_folder, model_checkpoint_name)
-            torch.save({}, pytorch_model_path)
-
             print(f"New best model found! Saving model with AUC {state.best_metric} to {checkpoint_folder}")
 
             if hasattr(state, 'best_model_checkpoint') and state.best_model_checkpoint != None and os.path.exists(state.best_model_checkpoint):
@@ -66,17 +61,26 @@ class SaveBestModelCallback(TrainerCallback):
                 except Exception as e:
                     print("Error asd:", e)
 
+            kwargs["model"].save_pretrained(checkpoint_folder)
+
+            pytorch_model_path = os.path.join(checkpoint_folder, model_checkpoint_name)
+            torch.save({}, pytorch_model_path)
+
             # Save the path to the best model
             state.best_model_checkpoint = checkpoint_folder
 
 class LoadBestModelCallback(TrainerCallback):
     def on_train_end(self, args, state: TrainerState, control: TrainerControl, **kwargs):
         if state.best_model_checkpoint is not None:
-            print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
-            best_model_path = os.path.join(state.best_model_checkpoint, model_checkpoint_name)
-            adapters_weights = torch.load(best_model_path)
-            model = kwargs["model"]
-            set_peft_model_state_dict(model, adapters_weights)
+            try:
+                print(f"Loading best peft model from {state.best_model_checkpoint} (score: {state.best_metric}).")
+                best_model_path = os.path.join(state.best_model_checkpoint, model_checkpoint_name)
+                adapters_weights = torch.load(best_model_path)
+                model = kwargs["model"]
+                set_peft_model_state_dict(model, adapters_weights)
+            except Exception:
+                print("The best model checkpoint should exist but it failed to load!!")
+                print(Exception)
         else:
             print("No best model checkpoint available.")
         return control
