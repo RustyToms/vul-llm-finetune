@@ -388,6 +388,10 @@ def prepare_trainer(model, train_data, val_data, args, test_data=None):
     return trainer
 
 def run_training(args):
+    """
+    Example:
+    python3 /home/ma-user/modelarts/inputs/code_1/finetune/run.py --dataset_tar_gz='/home/ma-user/modelarts/inputs/data_0/java_k_1_strict_2023_07_03.tar.gz' --split="train" --seq_length 1024 --batch_size 1 --gradient_accumulation_steps 10 --learning_rate 1e-4 --lr_scheduler_type="cosine_with_restarts" --lr_scheduler_kwargs=num_cycles:4 --evaluation_strategy="steps" --eval_steps=40 --num_warmup_steps 20 --weight_decay 0.05 --output_dir='/home/ma-user/modelarts/outputs/results_0/' --log_freq=1 --delete_whitespaces --base_model starcoder --lora_r 8 --lora_alpha 8 --several_funcs_in_batch --eval_on_test_also --num_train_epochs=8
+    """
     model_and_data = prepare_model_and_data(args)
     model = model_and_data['model']
     train_data, val_data, test_data = model_and_data['data']
