@@ -1,7 +1,8 @@
 # models
 ContraBERT/saved_models/pretrain_models/
 LLM/saved_models
-LLM/outputs
+LLM/outputs/archive
+LLM/outputs/saved_models
 model.bin
 
 # artifacts from decompressing files
