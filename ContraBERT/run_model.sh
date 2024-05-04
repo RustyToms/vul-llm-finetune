@@ -70,7 +70,7 @@ python3 vulnerability_detection.py \
   --do_train \
   --do_test \
   --train_data_file=$DATA_PATH/$TRAIN_NAME \
-  --eval_data_file=$DATA_PATH/$VALID_NAME \
+  --eval_data_files="eval:${DATA_PATH}/${VALID_NAME},test:${DATA_PATH}/${TEST_NAME}" \
   --test_data_file=$DATA_PATH/$TEST_NAME \
   --epoch $EPOCH \
   --block_size $BLOCK_SIZE \
